@@ -23,7 +23,7 @@ type ContentItem = {
 };
 
 const octokit = new Octokit({});
-const stats: { [key: string]: number } = {};
+const stats: Map<string, number> = new Map();
 const repo = {
   owner: "lodash",
   repo: "lodash",
@@ -31,22 +31,16 @@ const repo = {
 };
 
 const countLetterFrequency = (text: string) => {
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i];
+  for (const char of text) {
     if (/[a-z]/i.test(char)) {
       const minChar = char.toLowerCase();
-      stats[minChar] = (stats[minChar] || 0) + 1;
+      stats.set(minChar, (stats.get(minChar) || 0) + 1);
     }
   }
 };
 
-const sortLetterFrequency = (freq: { [key: string]: number }) => {
-  return Object.entries(freq)
-    .sort((a, b) => b[1] - a[1])
-    .reduce((obj, [char, count]) => {
-      obj[char] = count;
-      return obj;
-    }, {});
+const sortLetterFrequency = (freq: Map<string, number>) => {
+  return new Map([...freq.entries()].sort((a, b) => b[1] - a[1]));
 };
 
 const getFileContent = async (url: string): Promise<string> => {
@@ -79,14 +73,19 @@ const getRepoStats = async (options: listRepoContentParameters) => {
   try {
     const data = await getRepoPathContent(options);
 
-    for (let item of data) {
-      if (
-        item.type === "file" &&
-        (item.name.endsWith(".js") || item.name.endsWith(".ts"))
-      ) {
+    const filePromises = data
+      .filter((item) => item.type === "file")
+      .filter((item) => item.name.endsWith(".js") || item.name.endsWith(".ts"))
+      .map(async (item) => {
         const text = await getFileContent(item.download_url);
         countLetterFrequency(text);
-      } else if (item.type === "dir") {
+      });
+
+    await Promise.allSettled(filePromises);
+
+    const dirPromises = data
+      .filter((item) => item.type === "dir")
+      .map(async (item) => {
         try {
           await getRepoStats({
             ...options,
@@ -95,8 +94,9 @@ const getRepoStats = async (options: listRepoContentParameters) => {
         } catch (error) {
           console.log(error);
         }
-      }
-    }
+      });
+
+    await Promise.all(dirPromises);
   } catch (error) {
     console.log(error);
   }
